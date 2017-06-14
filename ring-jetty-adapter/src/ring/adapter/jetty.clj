@@ -19,20 +19,20 @@
            [javax.servlet AsyncContext]
            [javax.servlet.http HttpServletRequest HttpServletResponse]))
 
-(defn- ^AbstractHandler proxy-handler [handler]
+(defn- ^AbstractHandler proxy-handler [handler request-builder]
   (proxy [AbstractHandler] []
     (handle [_ ^Request base-request request response]
-      (let [request-map  (servlet/build-request-map request)
+      (let [request-map  (request-builder request)
             response-map (handler request-map)]
         (servlet/update-servlet-response response response-map)
         (.setHandled base-request true)))))
 
-(defn- ^AbstractHandler async-proxy-handler [handler]
+(defn- ^AbstractHandler async-proxy-handler [handler request-builder]
   (proxy [AbstractHandler] []
     (handle [_ ^Request base-request request ^HttpServletResponse response]
       (let [^AsyncContext context (.startAsync request)]
         (handler
-         (servlet/build-request-map request)
+         (request-builder request)
          (fn [response-map]
            (servlet/update-servlet-response response context response-map))
          (fn [^Throwable exception]
@@ -126,6 +126,8 @@
   supplied options:
 
   :configurator         - a function called with the Jetty Server instance
+  :request-builder      - a function called with HttpServletRequest instance
+                          to build request map (default ring.util.servlet/build-request-map)
   :async?               - if true, treat the handler as asynchronous
   :port                 - the port to listen on (defaults to 80)
   :host                 - the hostname to listen on
@@ -156,9 +158,9 @@
   :response-header-size - the maximum size of a response header (default 8192)
   :send-server-version? - add Server header to HTTP response (default true)"
   [handler options]
-  (let [server (create-server (dissoc options :configurator))
+  (let [server (create-server (dissoc options :configurator :request-builder))
         proxyf (if (:async? options) async-proxy-handler proxy-handler)]
-    (.setHandler server (proxyf handler))
+    (.setHandler server (proxyf handler (:request-builder options servlet/build-request-map)))
     (when-let [configurator (:configurator options)]
       (configurator server))
     (try
